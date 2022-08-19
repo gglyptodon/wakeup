@@ -71,9 +71,9 @@ pub fn run(config: Config) -> WakeUpResult<()> {
         }
     }
     if let Some(available) = machines.get(&config.machine_name) {
-        println!("Waking up < {} >", available);
-        println!("Check back in a few minutes");
-        send_magic_packet(available)?
+        println!("Trying to wake up < {} >", available);
+        send_magic_packet(available)?;
+        println!("Magic packet sent. Check back in a few minutes.");
     } else {
         eprintln!("Name provided: {}", &config.machine_name);
         return Err(UnknownHostError.into());
@@ -135,7 +135,6 @@ fn read_config(conf: &Config) -> WakeUpResult<HashMap<String, Machine>> {
             if conf.debug {
                 println!("debug: {:?}", m);
             }
-            //machines.push(m);
             machines.insert(m.name.clone(), m);
         }
     }
@@ -154,16 +153,7 @@ fn send_magic_packet(machine: &Machine) -> WakeUpResult<()> {
     let mut destination = machine.ip_address.clone();
     destination.push_str(":9");
     println!("{}", &destination);
-     udp_socket.send_to(&magic_packet, &destination)?;
-    /*match udp_socket.send_to(&magic_packet, &machine.ip_address) {
-        //todo port 9
-        Ok(_) => {
-            println!("Sent to: {}", &machine.mac_address);
-        }
-        Err(e) => {
-            println!("Something went wrong: {:?}", e);
-        }
-    }*/
+    udp_socket.send_to(&magic_packet, &destination)?;
 
     Ok(())
 }
