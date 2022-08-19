@@ -1,11 +1,10 @@
-mod magic;
-
 use clap::{Arg, Command};
 use std::collections::HashMap;
 use std::error::Error;
-use std::fmt::{write, Display, Formatter};
+use std::fmt::{Display, Formatter};
 use std::fs::File;
 use std::io::{BufRead, BufReader};
+use std::net::UdpSocket;
 
 type WakeUpResult<T> = Result<T, Box<dyn Error>>;
 
@@ -103,6 +102,16 @@ impl Display for UnknownHostError {
 
 impl Error for UnknownHostError {}
 
+#[derive(Debug, Clone)]
+pub struct MagicError;
+impl Display for MagicError {
+    fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
+        write!(f, "Something went wrong while crafting the magic package.")
+    }
+}
+
+impl Error for MagicError {}
+
 fn read_config(conf: &Config) -> WakeUpResult<HashMap<String, Machine>> {
     //let mut machines: Vec<Machine> = Vec::new();
     let mut machines: HashMap<String, Machine> = HashMap::new();
@@ -134,24 +143,58 @@ fn read_config(conf: &Config) -> WakeUpResult<HashMap<String, Machine>> {
     Ok(machines)
 }
 /*The magic packet is a frame that is most often sent as a broadcast and that contains
- anywhere within its payload 6 bytes of all 255 (FF FF FF FF FF FF in hexadecimal),
-  followed by sixteen repetitions of the target computer's 48-bit MAC address,
-  for a total of 102 bytes.
- */
-fn send_magic_packet(machine: &Machine)-> WakeUpResult<()>{
-    let mac_as_bytes = convert_mac(&machine.mac_address)?;
-    println!("{:?}", mac_as_bytes);
+anywhere within its payload 6 bytes of all 255 (FF FF FF FF FF FF in hexadecimal),
+ followed by sixteen repetitions of the target computer's 48-bit MAC address,
+ for a total of 102 bytes.
+*/
+fn send_magic_packet(machine: &Machine) -> WakeUpResult<()> {
+    let magic_packet = craft_magic_packet(&machine.mac_address)?;
+
+    let udp_socket = UdpSocket::bind("0.0.0.0:0")?;
+    let mut destination = machine.ip_address.clone();
+    destination.push_str(":9");
+    println!("{}", &destination);
+     udp_socket.send_to(&magic_packet, &destination)?;
+    /*match udp_socket.send_to(&magic_packet, &machine.ip_address) {
+        //todo port 9
+        Ok(_) => {
+            println!("Sent to: {}", &machine.mac_address);
+        }
+        Err(e) => {
+            println!("Something went wrong: {:?}", e);
+        }
+    }*/
+
     Ok(())
 }
 
+fn craft_magic_packet(mac_address: &String) -> WakeUpResult<Vec<u8>> {
+    let mac_as_bytes = convert_mac(&mac_address)?;
+    let mut magic: Vec<u8> = vec![0xff; 6];
+    let mut reps: Vec<u8> = Vec::new();
+    for _ in 0..16 {
+        reps.extend(&mac_as_bytes)
+    }
+    magic.extend(&reps);
+    if magic.len() != 102 {
+        return Err(MagicError.into());
+    }
+    //println!("{:?}\n -> {:?}\n-> magic:{:?} \n length: {:?} bytes", &mac_as_bytes, &reps, &magic, &magic.len());
+    Ok(magic)
+}
 
 fn convert_mac(mac: &String) -> Result<Vec<u8>, String> {
     let splits = mac.split(":");
-    let result = splits.into_iter().filter_map(|x|hex::decode(x).ok()).flatten().collect::<Vec<u8>>();
+    let result = splits
+        .into_iter()
+        .filter_map(|x| hex::decode(x).ok())
+        .flatten()
+        .collect::<Vec<u8>>();
     return if result.len() == 6 {
         Ok(result)
-    } else { Err(format!("invalid Mac: {}-> {:?}",&mac,&result)).into() }
-
+    } else {
+        Err(format!("invalid Mac: {}-> {:?}", &mac, &result)).into()
+    };
 }
 
 #[cfg(test)]
