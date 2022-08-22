@@ -246,8 +246,95 @@ fn convert_mac(mac: &String) -> Result<Vec<u8>, String> {
 
 #[cfg(test)]
 mod tests {
+    use crate::{convert_mac, craft_magic_packet, Host, HostPool};
+
     #[test]
     fn test_test() {
         assert_eq!(1, 1)
+    }
+
+    #[test]
+    fn test_valid_mac() {
+        let mac = "aa:bb:cc:dd:ee:ff".to_string();
+        let expected: Vec<u8> = vec![170, 187, 204, 221, 238, 255];
+        let result = convert_mac(&mac);
+        assert_eq!(expected, result.unwrap());
+    }
+
+    #[test]
+    #[should_panic]
+    fn test_invalid_mac_short() {
+        let mac = "bb:cc:dd:ee:ff".to_string();
+        let _result = convert_mac(&mac).unwrap();
+    }
+
+    #[test]
+    #[should_panic]
+    fn test_invalid_mac() {
+        let mac = "gg:bb:cc:dd:ee:ff".to_string();
+        let _result = convert_mac(&mac).unwrap();
+    }
+
+    #[test]
+    fn test_valid_magic_len() {
+        let mac = "aa:bb:cc:dd:ee:ff".to_string();
+        let expected = 102;
+        let result = craft_magic_packet(&mac);
+        assert_eq!(expected, result.unwrap().len());
+    }
+
+    #[test]
+    fn test_valid_magic() {
+        let mac = "aa:bb:cc:dd:ee:ff".to_string();
+        let expected = vec![
+            255, 255, 255, 255, 255, 255, 170, 187, 204, 221, 238, 255, 170, 187, 204, 221, 238,
+            255, 170, 187, 204, 221, 238, 255, 170, 187, 204, 221, 238, 255, 170, 187, 204, 221,
+            238, 255, 170, 187, 204, 221, 238, 255, 170, 187, 204, 221, 238, 255, 170, 187, 204,
+            221, 238, 255, 170, 187, 204, 221, 238, 255, 170, 187, 204, 221, 238, 255, 170, 187,
+            204, 221, 238, 255, 170, 187, 204, 221, 238, 255, 170, 187, 204, 221, 238, 255, 170,
+            187, 204, 221, 238, 255, 170, 187, 204, 221, 238, 255, 170, 187, 204, 221, 238, 255,
+        ];
+
+        let result = craft_magic_packet(&mac);
+        assert_eq!(expected, result.unwrap());
+    }
+
+    #[test]
+    fn test_parse_toml() {
+        let mytoml = r#" hosts = [{ name= "my_host", mac_addresses = ["aa:bb:cc:dd:ee:ff"] },
+        { name = "my_other_host", mac_addresses = ["00:11:22:33:ff:ff", "00:11:22:33:44:ff"] },]"#;
+        let result = toml::from_str::<HostPool>(mytoml).unwrap();
+        let expected = HostPool {
+            hosts: vec![
+                Host::new(vec!["aa:bb:cc:dd:ee:ff".to_string()], "my_host".to_string()),
+                Host::new(
+                    vec![
+                        "00:11:22:33:ff:ff".to_string(),
+                        "00:11:22:33:44:ff".to_string(),
+                    ],
+                    "my_other_host".to_string(),
+                ),
+            ],
+        };
+        assert_eq!(
+            expected.hosts.get(0).unwrap().name,
+            result.hosts.get(0).unwrap().name
+        );
+        assert_eq!(
+            expected.hosts.get(1).unwrap().name,
+            result.hosts.get(1).unwrap().name
+        );
+        assert_eq!(
+            expected.hosts.get(0).unwrap().mac_addresses.get(0).unwrap(),
+            result.hosts.get(0).unwrap().mac_addresses.get(0).unwrap()
+        );
+        assert_eq!(
+            expected.hosts.get(1).unwrap().mac_addresses.get(0).unwrap(),
+            result.hosts.get(1).unwrap().mac_addresses.get(0).unwrap()
+        );
+        assert_eq!(
+            expected.hosts.get(1).unwrap().mac_addresses.get(1).unwrap(),
+            result.hosts.get(1).unwrap().mac_addresses.get(1).unwrap()
+        );
     }
 }
