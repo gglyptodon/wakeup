@@ -1,12 +1,12 @@
 use clap::{builder::NonEmptyStringValueParser, Arg, ArgGroup, Command};
+use directories_next::ProjectDirs;
 use regex::Regex;
+use serde::Deserialize;
 use std::collections::HashMap;
 use std::error::Error;
 use std::fmt::{Display, Formatter};
 use std::fs;
 use std::net::UdpSocket;
-use directories_next::{ProjectDirs};
-use serde::Deserialize;
 
 type WakeUpResult<T> = Result<T, Box<dyn Error>>;
 
@@ -26,13 +26,16 @@ struct Machine {
 }
 
 #[derive(Debug, Deserialize)]
-struct MachinePool{
-    machines: Vec<Machine>
+struct MachinePool {
+    machines: Vec<Machine>,
 }
 
 impl Machine {
     fn new(mac_addresses: Vec<String>, name: String) -> Self {
-        Machine { mac_addresses, name }
+        Machine {
+            mac_addresses,
+            name,
+        }
     }
 }
 impl Display for Machine {
@@ -115,7 +118,7 @@ pub fn run(config: Config) -> WakeUpResult<()> {
 
     // named machine mode
     if let Some(name) = &config.machine_name {
-        if read_config().is_err(){
+        if read_config().is_err() {
             eprintln!("Could not read config file. You can still use a mac-address.")
         }
         let machines = read_config()?;
@@ -136,7 +139,10 @@ pub fn run(config: Config) -> WakeUpResult<()> {
     // mac address mode
     else {
         let anon = Machine::new(vec![config.mac_address.unwrap()], "".to_string());
-        println!("Trying to wake up host at < {} >", &anon.mac_addresses.get(0).unwrap());
+        println!(
+            "Trying to wake up host at < {} >",
+            &anon.mac_addresses.get(0).unwrap()
+        );
         send_magic_packet(&anon, &config.ip_address, &config.port)?;
         println!("Magic packet sent. Check back in a few minutes.");
     }
@@ -181,46 +187,21 @@ impl Display for MagicError {
 impl Error for MagicError {}
 
 fn read_config() -> WakeUpResult<HashMap<String, Machine>> {
-    if let Some(proj_dirs) = ProjectDirs::from("dev", "gglyptodon",  "wakeup") {
+    if let Some(proj_dirs) = ProjectDirs::from("dev", "gglyptodon", "wakeup") {
         let conf_dir = proj_dirs.config_dir();
         let config_name = "config.toml";
         let input = fs::read_to_string(conf_dir.join(config_name))?;
-        //println!("input:{}", &input);
         let pool: MachinePool = toml::from_str(&input).unwrap();
-        //println!("Pool {:?}", &pool);
         let mut machines: HashMap<String, Machine> = HashMap::new();
         for m in pool.machines.iter() {
             machines.insert(m.name.clone(), m.clone());
         }
         Ok(machines)
-    }else{
-        return Err(Box::new(ConfigFileNotFoundError))
+    } else {
+        Err(Box::new(ConfigFileNotFoundError))
     }
-
-
-    //let config_path = "/etc/wakeup/wakeup.conf";
-    //let input = File::open(config_path)?;
-    //let buffered = BufReader::new(input);
-    //for line in buffered.lines().flatten() {
-    //    let tmp = line.split(',').collect::<Vec<&str>>();
-    //    if tmp.len() != 2 {
-    //        if conf.debug {
-     //           eprintln!("debug: {:?} <- invalid line", tmp);
-     //       }
-     //       return Err(ConfigError.into());
-    //    }
-    //    let m = Machine::new(
-    //        tmp.get(0).unwrap().to_string(),
-    //        tmp.get(1).unwrap().to_string(),
-     //   );
-     //   if conf.debug {
-     //       println!("debug: {:?}", m);
-     //   }
-     //   machines.insert(m.name.clone(), m);
-   // }
-
-    //Ok(machines)
 }
+
 /*
  The magic packet is a frame that is most often sent as a broadcast and that contains
  anywhere within its payload 6 bytes of all 255 (FF FF FF FF FF FF in hexadecimal),
@@ -241,10 +222,15 @@ fn send_magic_packet(
         None => 9.to_string(),
     };
     let destination = format!("{}:{}", destination_address, destination_port);
-    let magic_packet = craft_magic_packet(&machine.mac_addresses.get(0).unwrap())?;//todo
+    let mut magic_packets: Vec<Vec<u8>> = Vec::new();
+    for mac_address in &machine.mac_addresses {
+        magic_packets.push(craft_magic_packet(mac_address)?);
+    }
     let udp_socket = UdpSocket::bind("0.0.0.0:0")?;
     udp_socket.set_broadcast(true)?;
-    udp_socket.send_to(&magic_packet, &destination)?;
+    for magic_packet in magic_packets {
+        udp_socket.send_to(&magic_packet, &destination)?;
+    }
     Ok(())
 }
 
