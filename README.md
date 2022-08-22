@@ -1,5 +1,5 @@
 # wakeup
-
+[![Rust](https://github.com/gglyptodon/wakeup/actions/workflows/rust.yml/badge.svg)](https://github.com/gglyptodon/wakeup/actions/workflows/rust.yml)
 ## Usage
 
 ```
