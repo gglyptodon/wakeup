@@ -12,33 +12,32 @@ type WakeUpResult<T> = Result<T, Box<dyn Error>>;
 
 #[derive(Debug)]
 pub struct Config {
-    machine_name: Option<String>,
+    host_name: Option<String>,
     ip_address: Option<String>,
     port: Option<u16>,
     mac_address: Option<String>,
-    debug: bool,
 }
 
 #[derive(Debug, Deserialize, Clone)]
-struct Machine {
+struct Host {
     mac_addresses: Vec<String>,
     name: String,
 }
 
 #[derive(Debug, Deserialize)]
-struct MachinePool {
-    machines: Vec<Machine>,
+struct HostPool {
+    hosts: Vec<Host>,
 }
 
-impl Machine {
+impl Host {
     fn new(mac_addresses: Vec<String>, name: String) -> Self {
-        Machine {
+        Host {
             mac_addresses,
             name,
         }
     }
 }
-impl Display for Machine {
+impl Display for Host {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.name)
     }
@@ -48,10 +47,10 @@ pub fn get_args() -> WakeUpResult<Config> {
     let ip_addr_re: Regex = Regex::new("^(?:[0-9]{1,3}.){3}[0-9]{1,3}$").unwrap();
     let mac_addr_re: Regex = Regex::new("^([0-9A-Fa-f]{2}:){5}([0-9A-Fa-f]{2})$").unwrap();
     let matches = Command::new("wakeup")
-        .about("Wake up a machine in the network with (a) magic (packet)")
+        .about("Wake up a host in the network with (a) magic (packet)")
         .arg(Arg::new("hostname")
                  .value_parser(NonEmptyStringValueParser::new())
-                 .help("the name of the machine you want to wake up"),
+                 .help("the name of the host you want to wake up"),
                 )
         .arg(Arg::new("mac_address")
                  .validator(|x|
@@ -61,13 +60,7 @@ pub fn get_args() -> WakeUpResult<Config> {
                      }
                  )
                 .conflicts_with("hostname")
-                .help("the mac address of the machine you want to wake up"),
-        )
-        .arg(
-            Arg::new("debug")
-                .long("--debug")
-                .takes_value(false)
-                .help("Print debug output to stdout"),
+                .help("the mac address of the host you want to wake up"),
         )
         .arg(Arg::new("use_ip")
             .long("use-ip")
@@ -96,38 +89,27 @@ pub fn get_args() -> WakeUpResult<Config> {
         )
         .get_matches();
 
-    let machine_name = matches.get_one::<String>("hostname").map(String::from);
+    let host_name = matches.get_one::<String>("hostname").map(String::from);
     let mac_address = matches.get_one::<String>("mac_address").map(String::from);
     let ip_address = matches.get_one::<String>("use_ip").map(String::from);
     let port = matches.get_one::<u16>("port").copied();
-    let debug = matches.is_present("debug");
 
     Ok(Config {
-        machine_name,
+        host_name,
         ip_address,
         port,
         mac_address,
-        debug,
     })
 }
 
 pub fn run(config: Config) -> WakeUpResult<()> {
-    if config.debug {
-        println!("config: {:#?}", &config);
-    }
-
-    // named machine mode
-    if let Some(name) = &config.machine_name {
+    // named mode
+    if let Some(name) = &config.host_name {
         if read_config().is_err() {
             eprintln!("Could not read config file. You can still use a mac-address.")
         }
-        let machines = read_config()?;
-        if config.debug {
-            for item in &machines {
-                println!("debug: {:?}", item);
-            }
-        }
-        if let Some(available) = machines.get(name) {
+        let hosts = read_config()?;
+        if let Some(available) = hosts.get(name) {
             println!("Trying to wake up < {} >", available);
             send_magic_packet(available, &config.ip_address, &config.port)?;
             println!("Magic packet sent. Check back in a few minutes.");
@@ -138,7 +120,7 @@ pub fn run(config: Config) -> WakeUpResult<()> {
     }
     // mac address mode
     else {
-        let anon = Machine::new(vec![config.mac_address.unwrap()], "".to_string());
+        let anon = Host::new(vec![config.mac_address.unwrap()], "".to_string());
         println!(
             "Trying to wake up host at < {} >",
             &anon.mac_addresses.get(0).unwrap()
@@ -186,17 +168,17 @@ impl Display for MagicError {
 }
 impl Error for MagicError {}
 
-fn read_config() -> WakeUpResult<HashMap<String, Machine>> {
+fn read_config() -> WakeUpResult<HashMap<String, Host>> {
     if let Some(proj_dirs) = ProjectDirs::from("dev", "gglyptodon", "wakeup") {
         let conf_dir = proj_dirs.config_dir();
         let config_name = "config.toml";
         let input = fs::read_to_string(conf_dir.join(config_name))?;
-        let pool: MachinePool = toml::from_str(&input).unwrap();
-        let mut machines: HashMap<String, Machine> = HashMap::new();
-        for m in pool.machines.iter() {
-            machines.insert(m.name.clone(), m.clone());
+        let pool: HostPool = toml::from_str(&input).unwrap();
+        let mut hosts: HashMap<String, Host> = HashMap::new();
+        for m in pool.hosts.iter() {
+            hosts.insert(m.name.clone(), m.clone());
         }
-        Ok(machines)
+        Ok(hosts)
     } else {
         Err(Box::new(ConfigFileNotFoundError))
     }
@@ -209,7 +191,7 @@ fn read_config() -> WakeUpResult<HashMap<String, Machine>> {
  for a total of 102 bytes.
 */
 fn send_magic_packet(
-    machine: &Machine,
+    host: &Host,
     address: &Option<String>,
     port: &Option<u16>,
 ) -> WakeUpResult<()> {
@@ -223,7 +205,7 @@ fn send_magic_packet(
     };
     let destination = format!("{}:{}", destination_address, destination_port);
     let mut magic_packets: Vec<Vec<u8>> = Vec::new();
-    for mac_address in &machine.mac_addresses {
+    for mac_address in &host.mac_addresses {
         magic_packets.push(craft_magic_packet(mac_address)?);
     }
     let udp_socket = UdpSocket::bind("0.0.0.0:0")?;
