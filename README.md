@@ -21,3 +21,13 @@ OPTIONS:
 ```
 ## Config files
 On linux, `~/.config/wakeup/config.toml` is used when looking for a config file.
+
+Example config.toml:
+
+```
+hosts = [
+    { name= "my_host", mac_addresses = ["aa:bb:cc:dd:ee:ff"] },
+    { name = "my_other_host", mac_addresses = ["00:11:22:33:ff:ff", "00:11:22:33:44:ff"] },
+]
+
+```
