@@ -3,9 +3,10 @@ use regex::Regex;
 use std::collections::HashMap;
 use std::error::Error;
 use std::fmt::{Display, Formatter};
-use std::fs::File;
-use std::io::{BufRead, BufReader};
+use std::fs;
 use std::net::UdpSocket;
+use directories_next::{ProjectDirs};
+use serde::Deserialize;
 
 type WakeUpResult<T> = Result<T, Box<dyn Error>>;
 
@@ -18,15 +19,20 @@ pub struct Config {
     debug: bool,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Deserialize, Clone)]
 struct Machine {
-    mac_address: String,
+    mac_addresses: Vec<String>,
     name: String,
 }
 
+#[derive(Debug, Deserialize)]
+struct MachinePool{
+    machines: Vec<Machine>
+}
+
 impl Machine {
-    fn new(mac_address: String, name: String) -> Self {
-        Machine { mac_address, name }
+    fn new(mac_addresses: Vec<String>, name: String) -> Self {
+        Machine { mac_addresses, name }
     }
 }
 impl Display for Machine {
@@ -109,7 +115,10 @@ pub fn run(config: Config) -> WakeUpResult<()> {
 
     // named machine mode
     if let Some(name) = &config.machine_name {
-        let machines = read_config(&config)?;
+        if read_config().is_err(){
+            eprintln!("Could not read config file. You can still use a mac-address.")
+        }
+        let machines = read_config()?;
         if config.debug {
             for item in &machines {
                 println!("debug: {:?}", item);
@@ -126,8 +135,8 @@ pub fn run(config: Config) -> WakeUpResult<()> {
     }
     // mac address mode
     else {
-        let anon = Machine::new(config.mac_address.unwrap(), "".to_string());
-        println!("Trying to wake up host at < {} >", &anon.mac_address);
+        let anon = Machine::new(vec![config.mac_address.unwrap()], "".to_string());
+        println!("Trying to wake up host at < {} >", &anon.mac_addresses.get(0).unwrap());
         send_magic_packet(&anon, &config.ip_address, &config.port)?;
         println!("Magic packet sent. Check back in a few minutes.");
     }
@@ -151,8 +160,16 @@ impl Display for UnknownHostError {
         write!(f, "Not a known host.")
     }
 }
-
 impl Error for UnknownHostError {}
+
+#[derive(Debug, Clone)]
+pub struct ConfigFileNotFoundError;
+impl Display for ConfigFileNotFoundError {
+    fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
+        write!(f, "Could not find config file.")
+    }
+}
+impl Error for ConfigFileNotFoundError {}
 
 #[derive(Debug, Clone)]
 pub struct MagicError;
@@ -161,33 +178,48 @@ impl Display for MagicError {
         write!(f, "Something went wrong while crafting the magic package.")
     }
 }
-
 impl Error for MagicError {}
 
-fn read_config(conf: &Config) -> WakeUpResult<HashMap<String, Machine>> {
-    let mut machines: HashMap<String, Machine> = HashMap::new();
-    let config_path = "/etc/wakeup/wakeup.conf";
-    let input = File::open(config_path)?;
-    let buffered = BufReader::new(input);
-    for line in buffered.lines().flatten() {
-        let tmp = line.split(',').collect::<Vec<&str>>();
-        if tmp.len() != 2 {
-            if conf.debug {
-                eprintln!("debug: {:?} <- invalid line", tmp);
-            }
-            return Err(ConfigError.into());
+fn read_config() -> WakeUpResult<HashMap<String, Machine>> {
+    if let Some(proj_dirs) = ProjectDirs::from("dev", "gglyptodon",  "wakeup") {
+        let conf_dir = proj_dirs.config_dir();
+        let config_name = "config.toml";
+        let input = fs::read_to_string(conf_dir.join(config_name))?;
+        //println!("input:{}", &input);
+        let pool: MachinePool = toml::from_str(&input).unwrap();
+        //println!("Pool {:?}", &pool);
+        let mut machines: HashMap<String, Machine> = HashMap::new();
+        for m in pool.machines.iter() {
+            machines.insert(m.name.clone(), m.clone());
         }
-        let m = Machine::new(
-            tmp.get(0).unwrap().to_string(),
-            tmp.get(1).unwrap().to_string(),
-        );
-        if conf.debug {
-            println!("debug: {:?}", m);
-        }
-        machines.insert(m.name.clone(), m);
+        Ok(machines)
+    }else{
+        return Err(Box::new(ConfigFileNotFoundError))
     }
 
-    Ok(machines)
+
+    //let config_path = "/etc/wakeup/wakeup.conf";
+    //let input = File::open(config_path)?;
+    //let buffered = BufReader::new(input);
+    //for line in buffered.lines().flatten() {
+    //    let tmp = line.split(',').collect::<Vec<&str>>();
+    //    if tmp.len() != 2 {
+    //        if conf.debug {
+     //           eprintln!("debug: {:?} <- invalid line", tmp);
+     //       }
+     //       return Err(ConfigError.into());
+    //    }
+    //    let m = Machine::new(
+    //        tmp.get(0).unwrap().to_string(),
+    //        tmp.get(1).unwrap().to_string(),
+     //   );
+     //   if conf.debug {
+     //       println!("debug: {:?}", m);
+     //   }
+     //   machines.insert(m.name.clone(), m);
+   // }
+
+    //Ok(machines)
 }
 /*
  The magic packet is a frame that is most often sent as a broadcast and that contains
@@ -209,7 +241,7 @@ fn send_magic_packet(
         None => 9.to_string(),
     };
     let destination = format!("{}:{}", destination_address, destination_port);
-    let magic_packet = craft_magic_packet(&machine.mac_address)?;
+    let magic_packet = craft_magic_packet(&machine.mac_addresses.get(0).unwrap())?;//todo
     let udp_socket = UdpSocket::bind("0.0.0.0:0")?;
     udp_socket.set_broadcast(true)?;
     udp_socket.send_to(&magic_packet, &destination)?;
