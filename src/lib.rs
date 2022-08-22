@@ -2,12 +2,13 @@ use clap::{builder::NonEmptyStringValueParser, Arg, ArgGroup, Command};
 use regex::Regex;
 use std::collections::HashMap;
 use std::error::Error;
-use std::fmt::{format, Display, Formatter};
+use std::fmt::{Display, Formatter};
 use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::net::UdpSocket;
 
 type WakeUpResult<T> = Result<T, Box<dyn Error>>;
+
 #[derive(Debug)]
 pub struct Config {
     machine_name: Option<String>,
@@ -37,7 +38,6 @@ impl Display for Machine {
 pub fn get_args() -> WakeUpResult<Config> {
     let ip_addr_re: Regex = Regex::new("^(?:[0-9]{1,3}.){3}[0-9]{1,3}$").unwrap();
     let mac_addr_re: Regex = Regex::new("^([0-9A-Fa-f]{2}:){5}([0-9A-Fa-f]{2})$").unwrap();
-
     let matches = Command::new("wakeup")
         .about("Wake up a machine in the network with (a) magic (packet)")
         .arg(Arg::new("hostname")
@@ -46,13 +46,11 @@ pub fn get_args() -> WakeUpResult<Config> {
                 )
         .arg(Arg::new("mac_address")
                  .validator(|x|
-                     if mac_addr_re.is_match(x){
-                        Ok(())
-                     }
-                    else{
+                     if mac_addr_re.is_match(x){ Ok(()) }
+                     else {
                         Err("Invalid format for mac address. Please use ':' as separator between hex digits.")
-                    }
-                )
+                     }
+                 )
                 .conflicts_with("hostname")
                 .help("the mac address of the machine you want to wake up"),
         )
@@ -73,7 +71,7 @@ pub fn get_args() -> WakeUpResult<Config> {
             .default_value("255.255.255.255")
             .validator(|x|if ip_addr_re.is_match(x){Ok(())}else{Err("Invalid format for ip address")})
         )
-        .arg(Arg::new("use_port")
+        .arg(Arg::new("port")
             .long("use-port")
             .short('p')
             .value_name("PORT").takes_value(true)
@@ -89,24 +87,12 @@ pub fn get_args() -> WakeUpResult<Config> {
         )
         .get_matches();
 
-    let machine_name = match matches.get_one::<String>("hostname") {
-        Some(v) => Some(String::from(v)),
-        None => None,
-    };
-
-    let mac_address = match matches.get_one::<String>("mac_address") {
-        Some(v) => Some(String::from(v)),
-        None => None,
-    };
-
-    let ip_address = match matches.get_one::<String>("use_ip") {
-        Some(v) => Some(String::from(v)),
-        None => None,
-    };
-
+    let machine_name = matches.get_one::<String>("hostname").map(String::from);
+    let mac_address = matches.get_one::<String>("mac_address").map(String::from);
+    let ip_address = matches.get_one::<String>("use_ip").map(String::from);
     let port = matches.get_one::<u16>("port").copied();
-
     let debug = matches.is_present("debug");
+
     Ok(Config {
         machine_name,
         ip_address,
@@ -141,7 +127,9 @@ pub fn run(config: Config) -> WakeUpResult<()> {
     // mac address mode
     else {
         let anon = Machine::new(config.mac_address.unwrap(), "".to_string());
+        println!("Trying to wake up host at < {} >", &anon.mac_address);
         send_magic_packet(&anon, &config.ip_address, &config.port)?;
+        println!("Magic packet sent. Check back in a few minutes.");
     }
     Ok(())
 }
@@ -177,30 +165,26 @@ impl Display for MagicError {
 impl Error for MagicError {}
 
 fn read_config(conf: &Config) -> WakeUpResult<HashMap<String, Machine>> {
-    //let mut machines: Vec<Machine> = Vec::new();
     let mut machines: HashMap<String, Machine> = HashMap::new();
     let config_path = "/etc/wakeup/wakeup.conf";
     let input = File::open(config_path)?;
     let buffered = BufReader::new(input);
-    for line in buffered.lines() {
-        if let Ok(l) = line {
-            let tmp = l.split(',').collect::<Vec<&str>>();
-            if tmp.len() != 3 {
-                if conf.debug {
-                    eprintln!("debug: {:?} <- invalid line", tmp);
-                }
-                return Err(ConfigError.into());
-            }
-            let m = Machine::new(
-                tmp.get(0).unwrap().to_string(),
-                tmp.get(1).unwrap().to_string(),
-                //tmp.get(2).unwrap().to_string(),
-            );
+    for line in buffered.lines().flatten() {
+        let tmp = line.split(',').collect::<Vec<&str>>();
+        if tmp.len() != 2 {
             if conf.debug {
-                println!("debug: {:?}", m);
+                eprintln!("debug: {:?} <- invalid line", tmp);
             }
-            machines.insert(m.name.clone(), m);
+            return Err(ConfigError.into());
         }
+        let m = Machine::new(
+            tmp.get(0).unwrap().to_string(),
+            tmp.get(1).unwrap().to_string(),
+        );
+        if conf.debug {
+            println!("debug: {:?}", m);
+        }
+        machines.insert(m.name.clone(), m);
     }
 
     Ok(machines)
@@ -233,7 +217,7 @@ fn send_magic_packet(
 }
 
 fn craft_magic_packet(mac_address: &String) -> WakeUpResult<Vec<u8>> {
-    let mac_as_bytes = convert_mac(&mac_address)?;
+    let mac_as_bytes = convert_mac(mac_address)?;
     let mut magic: Vec<u8> = vec![0xff; 6];
     let mut reps: Vec<u8> = Vec::new();
     for _ in 0..16 {
@@ -247,7 +231,7 @@ fn craft_magic_packet(mac_address: &String) -> WakeUpResult<Vec<u8>> {
 }
 
 fn convert_mac(mac: &String) -> Result<Vec<u8>, String> {
-    let splits = mac.split(":");
+    let splits = mac.split(':');
     let result = splits
         .into_iter()
         .filter_map(|x| hex::decode(x).ok())
@@ -256,7 +240,7 @@ fn convert_mac(mac: &String) -> Result<Vec<u8>, String> {
     return if result.len() == 6 {
         Ok(result)
     } else {
-        Err(format!("Invalid MAC: {}-> {:?}", &mac, &result)).into()
+        Err(format!("Invalid MAC: {}-> {:?}", &mac, &result))
     };
 }
 
