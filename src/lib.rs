@@ -1,33 +1,31 @@
-use clap::{Arg, Command};
+use clap::{builder::NonEmptyStringValueParser, Arg, ArgGroup, Command};
+use regex::Regex;
 use std::collections::HashMap;
 use std::error::Error;
-use std::fmt::{Display, Formatter};
+use std::fmt::{format, Display, Formatter};
 use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::net::UdpSocket;
 
 type WakeUpResult<T> = Result<T, Box<dyn Error>>;
-
 #[derive(Debug)]
 pub struct Config {
-    machine_name: String,
+    machine_name: Option<String>,
+    ip_address: Option<String>,
+    port: Option<u16>,
+    mac_address: Option<String>,
     debug: bool,
 }
 
 #[derive(Debug)]
 struct Machine {
-    ip_address: String,
     mac_address: String,
     name: String,
 }
 
 impl Machine {
-    fn new(ip: String, mac: String, name: String) -> Self {
-        Machine {
-            ip_address: ip,
-            mac_address: mac,
-            name,
-        }
+    fn new(mac_address: String, name: String) -> Self {
+        Machine { mac_address, name }
     }
 }
 impl Display for Machine {
@@ -37,13 +35,26 @@ impl Display for Machine {
 }
 
 pub fn get_args() -> WakeUpResult<Config> {
+    let ip_addr_re: Regex = Regex::new("^(?:[0-9]{1,3}.){3}[0-9]{1,3}$").unwrap();
+    let mac_addr_re: Regex = Regex::new("^([0-9A-Fa-f]{2}:){5}([0-9A-Fa-f]{2})$").unwrap();
+
     let matches = Command::new("wakeup")
         .about("Wake up a machine in the network with (a) magic (packet)")
-        .arg(
-            Arg::new("machine")
-                .allow_invalid_utf8(true)
-                .required(true)
-                .help("the name of the machine you want to wake up"),
+        .arg(Arg::new("hostname")
+                 .value_parser(NonEmptyStringValueParser::new())
+                 .help("the name of the machine you want to wake up"),
+                )
+        .arg(Arg::new("mac_address")
+                 .validator(|x|
+                     if mac_addr_re.is_match(x){
+                        Ok(())
+                     }
+                    else{
+                        Err("Invalid format for mac address. Please use ':' as separator between hex digits.")
+                    }
+                )
+                .conflicts_with("hostname")
+                .help("the mac address of the machine you want to wake up"),
         )
         .arg(
             Arg::new("debug")
@@ -51,34 +62,87 @@ pub fn get_args() -> WakeUpResult<Config> {
                 .takes_value(false)
                 .help("Print debug output to stdout"),
         )
+        .arg(Arg::new("use_ip")
+            .long("use-ip")
+            .short('i')
+            .value_name("IP_ADDRESS")
+            .takes_value(true)
+            .value_parser(NonEmptyStringValueParser::new())
+            .help("Use specific ip address instead of local broadcast")
+            .required(false)
+            .default_value("255.255.255.255")
+            .validator(|x|if ip_addr_re.is_match(x){Ok(())}else{Err("Invalid format for ip address")})
+        )
+        .arg(Arg::new("use_port")
+            .long("use-port")
+            .short('p')
+            .value_name("PORT").takes_value(true)
+            .value_parser(clap::value_parser!(u16).range(0..))
+            .help("Use specific port instead of default")
+            .required(false)
+            .default_value("9")
+        )
+        .group(ArgGroup::with_name("target")
+            .args(&["hostname", "mac_address"])
+            .multiple(false)
+            .required(true)
+        )
         .get_matches();
-    let machine_name = matches.value_of_lossy("machine").unwrap().to_string();
+
+    let machine_name = match matches.get_one::<String>("hostname") {
+        Some(v) => Some(String::from(v)),
+        None => None,
+    };
+
+    let mac_address = match matches.get_one::<String>("mac_address") {
+        Some(v) => Some(String::from(v)),
+        None => None,
+    };
+
+    let ip_address = match matches.get_one::<String>("use_ip") {
+        Some(v) => Some(String::from(v)),
+        None => None,
+    };
+
+    let port = matches.get_one::<u16>("port").copied();
+
     let debug = matches.is_present("debug");
     Ok(Config {
         machine_name,
+        ip_address,
+        port,
+        mac_address,
         debug,
     })
 }
 
 pub fn run(config: Config) -> WakeUpResult<()> {
     if config.debug {
-        println!("config: {:#?}", config);
-    }
-    let machines = read_config(&config)?;
-    if config.debug {
-        for item in &machines {
-            println!("debug: {:?}", item);
-        }
-    }
-    if let Some(available) = machines.get(&config.machine_name) {
-        println!("Trying to wake up < {} >", available);
-        send_magic_packet(available)?;
-        println!("Magic packet sent. Check back in a few minutes.");
-    } else {
-        eprintln!("Name provided: {}", &config.machine_name);
-        return Err(UnknownHostError.into());
+        println!("config: {:#?}", &config);
     }
 
+    // named machine mode
+    if let Some(name) = &config.machine_name {
+        let machines = read_config(&config)?;
+        if config.debug {
+            for item in &machines {
+                println!("debug: {:?}", item);
+            }
+        }
+        if let Some(available) = machines.get(name) {
+            println!("Trying to wake up < {} >", available);
+            send_magic_packet(available, &config.ip_address, &config.port)?;
+            println!("Magic packet sent. Check back in a few minutes.");
+        } else {
+            eprintln!("Name provided: {}", name);
+            return Err(UnknownHostError.into());
+        }
+    }
+    // mac address mode
+    else {
+        let anon = Machine::new(config.mac_address.unwrap(), "".to_string());
+        send_magic_packet(&anon, &config.ip_address, &config.port)?;
+    }
     Ok(())
 }
 
@@ -130,7 +194,7 @@ fn read_config(conf: &Config) -> WakeUpResult<HashMap<String, Machine>> {
             let m = Machine::new(
                 tmp.get(0).unwrap().to_string(),
                 tmp.get(1).unwrap().to_string(),
-                tmp.get(2).unwrap().to_string(),
+                //tmp.get(2).unwrap().to_string(),
             );
             if conf.debug {
                 println!("debug: {:?}", m);
@@ -141,20 +205,30 @@ fn read_config(conf: &Config) -> WakeUpResult<HashMap<String, Machine>> {
 
     Ok(machines)
 }
-/*The magic packet is a frame that is most often sent as a broadcast and that contains
-anywhere within its payload 6 bytes of all 255 (FF FF FF FF FF FF in hexadecimal),
+/*
+ The magic packet is a frame that is most often sent as a broadcast and that contains
+ anywhere within its payload 6 bytes of all 255 (FF FF FF FF FF FF in hexadecimal),
  followed by sixteen repetitions of the target computer's 48-bit MAC address,
  for a total of 102 bytes.
 */
-fn send_magic_packet(machine: &Machine) -> WakeUpResult<()> {
+fn send_magic_packet(
+    machine: &Machine,
+    address: &Option<String>,
+    port: &Option<u16>,
+) -> WakeUpResult<()> {
+    let destination_address = match address {
+        Some(val) => val.clone(),
+        None => String::from("255.255.255.255"),
+    };
+    let destination_port = match port {
+        Some(val) => val.to_string(),
+        None => 9.to_string(),
+    };
+    let destination = format!("{}:{}", destination_address, destination_port);
     let magic_packet = craft_magic_packet(&machine.mac_address)?;
-
     let udp_socket = UdpSocket::bind("0.0.0.0:0")?;
-    let mut destination = machine.ip_address.clone();
-    destination.push_str(":9");
-    println!("{}", &destination);
+    udp_socket.set_broadcast(true)?;
     udp_socket.send_to(&magic_packet, &destination)?;
-
     Ok(())
 }
 
@@ -169,7 +243,6 @@ fn craft_magic_packet(mac_address: &String) -> WakeUpResult<Vec<u8>> {
     if magic.len() != 102 {
         return Err(MagicError.into());
     }
-    //println!("{:?}\n -> {:?}\n-> magic:{:?} \n length: {:?} bytes", &mac_as_bytes, &reps, &magic, &magic.len());
     Ok(magic)
 }
 
@@ -183,7 +256,7 @@ fn convert_mac(mac: &String) -> Result<Vec<u8>, String> {
     return if result.len() == 6 {
         Ok(result)
     } else {
-        Err(format!("invalid Mac: {}-> {:?}", &mac, &result)).into()
+        Err(format!("Invalid MAC: {}-> {:?}", &mac, &result)).into()
     };
 }
 
