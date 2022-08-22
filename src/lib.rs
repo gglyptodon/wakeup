@@ -58,7 +58,7 @@ pub fn get_args() -> WakeUpResult<Config> {
                      else {
                         Err("Invalid format for mac address. Please use ':' as separator between hex digits.")
                      }
-                 )
+                 ).required(false).long("mac").short('m').takes_value(true).value_name("MAC_ADDRESS")
                 .conflicts_with("hostname")
                 .help("the mac address of the host you want to wake up"),
         )
