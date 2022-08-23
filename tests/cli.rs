@@ -38,6 +38,10 @@ fn test_dies_called_with_invalid_ip() -> TestResult {
 }
 
 #[test]
-fn test_dies_called_with_invalid_port()->TestResult {
-     let expected = "invalid digit found in string";
-    run_fail_contains(&["-m", "aa:bb:cc:dd:ee:ff", "-i", "127.0.0.1", "-p", "a"], expected)
+fn test_dies_called_with_invalid_port() -> TestResult {
+    let expected = "invalid digit found in string";
+    run_fail_contains(
+        &["-m", "aa:bb:cc:dd:ee:ff", "-i", "127.0.0.1", "-p", "a"],
+        expected,
+    )
+}
