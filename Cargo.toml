@@ -4,7 +4,8 @@ version = "0.1.0"
 edition = "2021"
 license = "MIT"
 readme = "README.md"
-
+description = "Wake-on-LAN / wol tool. Wake up a host with (a) magic (packet)"
+authors = ["Janina Mass <janina.mass@gmail.com>"]
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
