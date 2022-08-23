@@ -50,7 +50,7 @@ pub fn get_args() -> WakeUpResult<Config> {
         .about("Wake up a host in the network with (a) magic (packet)")
         .arg(Arg::new("hostname")
                  .value_parser(NonEmptyStringValueParser::new())
-                 .help("the name of the host you want to wake up"),
+                 .help("Name of the host you want to wake up"),
                 )
         .arg(Arg::new("mac_address")
                  .validator(|x|
@@ -60,9 +60,9 @@ pub fn get_args() -> WakeUpResult<Config> {
                      }
                  ).required(false).long("mac").short('m').takes_value(true).value_name("MAC_ADDRESS")
                 .conflicts_with("hostname")
-                .help("the mac address of the host you want to wake up"),
+                .help("MAC address of the host you want to wake up"),
         )
-        .arg(Arg::new("use_ip")
+        .arg(Arg::new("ip")
             .long("use-ip")
             .short('i')
             .value_name("IP_ADDRESS")
@@ -91,7 +91,7 @@ pub fn get_args() -> WakeUpResult<Config> {
 
     let host_name = matches.get_one::<String>("hostname").map(String::from);
     let mac_address = matches.get_one::<String>("mac_address").map(String::from);
-    let ip_address = matches.get_one::<String>("use_ip").map(String::from);
+    let ip_address = matches.get_one::<String>("ip").map(String::from);
     let port = matches.get_one::<u16>("port").copied();
 
     Ok(Config {
