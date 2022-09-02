@@ -23,6 +23,8 @@ OPTIONS:
 ## Config files
 On linux, `~/.config/wakeup/config.toml` is used when looking for a config file.
 
+On Mac: `~/Library/Application Suppport/dev.gglyptodon.wakeup/config.toml` is used when looking for a config file.
+
 Example config.toml:
 
 ```
