@@ -25,12 +25,14 @@ On linux, `~/.config/wakeup/config.toml` is used when looking for a config file.
 
 On Mac: `~/Library/Application Suppport/dev.gglyptodon.wakeup/config.toml` is used when looking for a config file.
 
-Example config.toml:
+On Windows: `{FOLDERID_RoamingAppData}`, e.g. `C:\Users\<USERNAME>\AppData\Roaming\gglyptodon\wakeup\config\config.toml` is used when looking for a config file.
+
+Example `config.toml`:
 
 ```
 hosts = [
     { name= "my_host", mac_addresses = ["aa:bb:cc:dd:ee:ff"] },
     { name = "my_other_host", mac_addresses = ["00:11:22:33:ff:ff", "00:11:22:33:44:ff"] },
+    { name = "all_my_hosts", mac_addresses = ["00:11:22:33:ff:ff", "00:11:22:33:44:ff", "aa:bb:cc:dd:ee:ff"] },
 ]
-
 ```
